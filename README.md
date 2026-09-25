@@ -151,29 +151,6 @@ If you use DORA in your research, please cite our following papers.
 }
 ```
 
-## Acknowledgments
-This benchmark builds upon the following excellent open datasets and data sources:
-- **xBD dataset** by Ritwik Gupta
-  - [Paper](https://openaccess.thecvf.com/content_CVPRW_2019/html/cv4gc/Gupta_Creating_xBD_A_Dataset_for_Assessing_Building_Damage_from_Satellite_CVPRW_2019_paper.html)
-  - [Dataset](https://xview2.org/dataset)
-  - License: [CC BY-NC-SA 4.0]
-
-- **DisasterM3 dataset**
-  - [Repository](https://github.com/Junjue-Wang/DisasterM3)
-  - License: [CC BY-NC-SA 4.0]
-
-- **BRIGHT dataset** by Hongruixuan Chen
-  - [Repository](https://github.com/ChenHongruixuan/BRIGHT)
-  - License: [CC BY-NC 4.0]
-
-- **Landslide4Sense** [Repository](https://github.com/iarai/Landslide4Sense-2022), **GVLM-CD** [Repository](https://github.com/zxk688/GVLM), **RescueNet** [Repository](https://github.com/BinaLab/RescueNet-A-High-Resolution-Post-Disaster-UAV-Dataset-for-Semantic-Segmentation), **CRASAR-U-DRoIDs** [Paper](https://arxiv.org/abs/2407.17673), **OpenEarthMap** [Website](https://open-earth-map.org/)
-
-- **NAIP** [Website](https://naip-usdaonline.hub.arcgis.com/), **Maxar Open Data Program** [Website](https://www.maxar.com/open-data), **Japan Meteorological Agency** [Website](https://www.jma.go.jp/jma/indexe.html), **Planet** imagery
-
-- **OpenStreetMap** [Website](https://www.openstreetmap.org) (License: ODbL), **Our World in Data** [Website](https://ourworldindata.org) (License: CC BY)
-
-Please also follow the original licenses of these datasets when using the corresponding source imagery and vector data.
-
 
 ## License
 All tasks, gold trajectories and annotations in DORA can be used for academic purposes only,
