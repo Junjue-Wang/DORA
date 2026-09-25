@@ -129,6 +129,7 @@ Each task is a tuple of a query (Q), a heterogeneous data manifest (D), a gold t
 ### Evaluation
 The benchmark and evaluation code will be released here. Stay tuned!
 - [ ] 515 task packages (queries, data manifests, gold trajectories and final answers)
+- [ ] Instructions for downloading the source imagery and vector data from the original providers
 - [ ] 108-tool MCP library and perception backbone checkpoints
 - [ ] Evaluation scripts for trajectory and final-answer metrics
 
@@ -155,6 +156,8 @@ If you use DORA in your research, please cite our following papers.
 ## License
 All tasks, gold trajectories and annotations in DORA can be used for academic purposes only,
 <font color="red"><b> but any commercial use is prohibited.</b></font>
+
+Source imagery and vector data are not redistributed in this repository. Please obtain them from the original providers and follow their licenses; the data sources are listed in the paper.
 
 <a rel="license" href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.en">
 <img alt="知识共享许可协议" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png" /></a>
