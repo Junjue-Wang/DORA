@@ -164,10 +164,10 @@ Source imagery and vector data are not redistributed in this repository. Please 
 
 ## Star History
 
-<a href="https://www.star-history.com/#Junjue-Wang/DORA&Date">
+<a href="https://www.star-history.com/?type=date&repos=Junjue-Wang%2FDORA">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Junjue-Wang/DORA&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Junjue-Wang/DORA&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Junjue-Wang/DORA&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Junjue-Wang/DORA&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Junjue-Wang/DORA&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Junjue-Wang/DORA&type=date&legend=top-left" />
  </picture>
 </a>
