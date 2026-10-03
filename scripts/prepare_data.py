@@ -28,7 +28,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-HF_REPO = "Junjue-Wang/DORA"              # Hugging Face dataset repo
+HF_REPO = "Kingdrone-Junjue/DORA"         # Hugging Face dataset repo
 HF_REVISION = "v1.0"                       # release tag
 KAGGLE_HANDLE = "doradataset/dora-benchmark"
 MANIFEST = "manifest.json"
