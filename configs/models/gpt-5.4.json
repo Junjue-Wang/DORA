@@ -1,0 +1,13 @@
+{
+  "name": "gpt-5.4",
+  "provider": "azure",
+  "model": "gpt-5.4",
+  "generate_args": {
+    "max_completion_tokens": 4096
+  },
+  "agent": {
+    "recursion_limit": 50,
+    "request_timeout_s": 1200,
+    "question_timeout_s": 900
+  }
+}

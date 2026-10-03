@@ -1,0 +1,16 @@
+{
+  "name": "mimo-v2-pro",
+  "provider": "openai",
+  "model": "xiaomi/mimo-v2-pro",
+  "base_url": "https://openrouter.ai/api/v1",
+  "api_key_env": "OPENROUTER_API_KEY",
+  "generate_args": {
+    "temperature": 0.1,
+    "max_completion_tokens": 4096
+  },
+  "agent": {
+    "recursion_limit": 50,
+    "request_timeout_s": 900,
+    "question_timeout_s": 900
+  }
+}
