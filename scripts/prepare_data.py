@@ -9,7 +9,8 @@
     python scripts/prepare_data.py --verify-only        # re-check an existing data directory
 
 The Hugging Face dataset is gated: request access once with the form on its page (granted
-automatically) and log in with ``hf auth login`` (or set ``HF_TOKEN``) before downloading.
+automatically) and log in with ``hf auth login`` (or set ``HF_TOKEN``) before downloading. Use a
+Read token; a fine-grained token needs "Read access to contents of all public gated repos you can access".
 
 Every file is checked against the release manifest (size + SHA-256). The data directory can
 live anywhere; point the code to it with ``export DORA_DATA=/path/to/data``.
@@ -67,7 +68,8 @@ def download_hf(data_dir: Path, parts, attempts: int = 5):
         except GatedRepoError:
             sys.exit(f"DORA on Hugging Face is gated: request access at https://huggingface.co/datasets/{HF_REPO}\n"
                      "(a short form, granted automatically), then log in with `hf auth login` (or set HF_TOKEN) "
-                     "and re-run.")
+                     "and re-run.\nUse a Read token; a fine-grained token needs \"Read access to contents of all "
+                     "public gated repos you can access\".")
         except (RepositoryNotFoundError, RevisionNotFoundError):
             raise
         except Exception as e:  # dropped connections and timeouts: finished files are kept, the rest resumes

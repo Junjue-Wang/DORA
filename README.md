@@ -116,21 +116,21 @@ Each task is a tuple of a query (Q), a heterogeneous data manifest (D), a gold t
 
 ```text
 {
-  sample_id: "beirut_explosion1",
-  question: "How many intact hospitals situated within 800 m of the Beirut Port Grain Silos explosion site's center.",
+  sample_id: "la_palma_volcano_00000516",
+  question: "How many buildings have been totally destroyed by the volcanic activity in this area?",
   input_data: {
-    pre_image:  {image_path: "pre_disaster1.tif",  modality: "optical", GSD_m: 0.8, coordinate_system: "WGS84", band: ["R", "G", "B"]},
-    post_image: {image_path: "post_disaster1.tif", modality: "SAR",     GSD_m: 0.8, coordinate_system: "WGS84", band: "intensity"},
-    poi_data:   {path: "poi.geojson"},
-    ...
+    pre_image:  {image_path: "la_palma_volcano_00000516_pre_disaster.tif",      modality: "optical", pixel_size_m: 0.8, spatial_coordinate_system: "EPSG:32628", band_info: ["R", "G", "B"]},
+    post_image: {image_path: "la_palma_volcano_00000516_sar_post_disaster.tif", modality: "sar",     pixel_size_m: 0.8, spatial_coordinate_system: "EPSG:32628", band_info: ["SAR"]}
   },
   trajectory: [
-    {call: "poi.search_by_name",
-     args: {geojson_path: "poi.geojson", name: "Beirut Port Grain Silos"},
-     obs:  {latitude: 33.9009381, longitude: 35.5182691, type: "establishment", ...}},
-    ...
+    {call: "seg.building_damage_opt_sar",
+     args: {pre_image_path: "la_palma_volcano_00000516_pre_disaster.tif", post_image_path: "la_palma_volcano_00000516_sar_post_disaster.tif"},
+     obs:  {mask_path: "la_palma_volcano_00000516_building_damage.tif", classes: {1: "intact", 2: "partially damaged", 3: "totally destroyed"}}},
+    {call: "ras.vectorize",
+     args: {mask_path: "la_palma_volcano_00000516_building_damage.tif", classes: [3], pixel_size_m: 0.8},
+     obs:  {count: 67, total_area_m2: 57034.24, ...}}
   ],
-  answer: 5
+  answer: {destroyed_building_count: 67, destroyed_building_total_area_m2: 57034.24}
 }
 ```
 
@@ -156,7 +156,8 @@ GDAL, PROJ and GEOS come with the `rasterio`/`pyogrio`/`shapely` wheels; no syst
 
 The Hugging Face dataset asks for a short access form (name, affiliation, email; granted
 automatically): request access on the [dataset page](https://huggingface.co/datasets/Kingdrone-Junjue/DORA),
-then log in once with `hf auth login` (or set `HF_TOKEN`). One command downloads the tasks, source
+then log in once with `hf auth login` (or set `HF_TOKEN`) using a Read token; a fine-grained token
+needs "Read access to contents of all public gated repos you can access". One command downloads the tasks, source
 layers and perception checkpoints (~18 GB) into `./data` and verifies every file against the release
 manifest:
 
