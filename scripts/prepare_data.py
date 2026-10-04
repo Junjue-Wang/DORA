@@ -9,6 +9,9 @@
     python scripts/prepare_data.py --rescuenet /path/to/RescueNet   # RescueNet originals from a local copy
     python scripts/prepare_data.py --verify-only        # re-check an existing data directory
 
+The Hugging Face dataset is gated: request access once with the form on its page (granted
+automatically) and log in with ``hf auth login`` (or set ``HF_TOKEN``) before downloading.
+
 Every file is checked against the release manifest (size + SHA-256). The data directory can
 live anywhere; point the code to it with ``export DORA_DATA=/path/to/data``.
 
@@ -63,7 +66,11 @@ def download_hf(data_dir: Path, parts, attempts: int = 5):
             snapshot_download(repo_id=HF_REPO, repo_type="dataset", revision=HF_REVISION, local_dir=data_dir,
                               allow_patterns=[MANIFEST, *DOCS, *(f"{part}/*" for part in parts)], max_workers=8)
             return
-        except (RepositoryNotFoundError, RevisionNotFoundError, GatedRepoError):
+        except GatedRepoError:
+            sys.exit(f"DORA on Hugging Face is gated: request access at https://huggingface.co/datasets/{HF_REPO}\n"
+                     "(a short form, granted automatically), then log in with `hf auth login` (or set HF_TOKEN) "
+                     "and re-run.")
+        except (RepositoryNotFoundError, RevisionNotFoundError):
             raise
         except Exception as e:  # dropped connections and timeouts: finished files are kept, the rest resumes
             if attempt == attempts:

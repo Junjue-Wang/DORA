@@ -154,8 +154,11 @@ GDAL, PROJ and GEOS come with the `rasterio`/`pyogrio`/`shapely` wheels; no syst
 > The data (tasks, source layers and perception checkpoints) is coming soon; the commands below work
 > once it is online.
 
-One command downloads the tasks, source layers and perception checkpoints (~18 GB) into `./data`
-and verifies every file against the release manifest:
+The Hugging Face dataset asks for a short access form (name, affiliation, email; granted
+automatically): request access on the [dataset page](https://huggingface.co/datasets/Kingdrone-Junjue/DORA),
+then log in once with `hf auth login` (or set `HF_TOKEN`). One command downloads the tasks, source
+layers and perception checkpoints (~18 GB) into `./data` and verifies every file against the release
+manifest:
 
 ```bash
 python scripts/prepare_data.py                    # Hugging Face (default); --source kaggle for the Kaggle mirror
