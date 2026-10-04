@@ -3,7 +3,6 @@
 
     python scripts/prepare_data.py                      # Hugging Face Hub -> ./data  (~18 GB)
     python scripts/prepare_data.py --no-checkpoints     # skip the perception weights (~12.7 GB): enough to score runs with evaluate.py, not to run the agents
-    python scripts/prepare_data.py --source kaggle      # Kaggle mirror (needs `pip install kagglehub`)
     python scripts/prepare_data.py --source /path/to/DORA_v1.0      # local copy / offline mirror
     python scripts/prepare_data.py --gvlm /path/to/GVLM             # GVLM from a local copy instead of downloading it
     python scripts/prepare_data.py --rescuenet /path/to/RescueNet   # RescueNet originals from a local copy
@@ -34,7 +33,6 @@ from pathlib import Path
 
 HF_REPO = "Kingdrone-Junjue/DORA"         # Hugging Face dataset repo
 HF_REVISION = "v1.0"                       # release tag
-KAGGLE_HANDLE = "doradataset/dora-benchmark"
 MANIFEST = "manifest.json"
 DOCS = ["README.md", "LICENSE.md"]
 DEFAULT_DATA = Path(__file__).resolve().parents[1] / "data"
@@ -77,14 +75,6 @@ def download_hf(data_dir: Path, parts, attempts: int = 5):
                 raise
             print(f"  download interrupted ({type(e).__name__}: {e}); retrying ({attempt}/{attempts - 1})")
             time.sleep(10 * attempt)
-
-
-def download_kaggle(data_dir: Path, parts):
-    try:
-        import kagglehub
-    except ImportError:
-        sys.exit("kagglehub is not installed: pip install kagglehub")
-    copy_tree(Path(kagglehub.dataset_download(KAGGLE_HANDLE)), data_dir, parts)
 
 
 def copy_tree(src: Path, data_dir: Path, parts):
@@ -307,7 +297,7 @@ def verify(data_dir: Path, manifest, parts, check_hash: bool, fetch_errors=None)
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", type=Path, default=Path(os.environ.get("DORA_DATA", DEFAULT_DATA)))
-    p.add_argument("--source", default="hf", help="'hf' (default), 'kaggle', or a local release directory")
+    p.add_argument("--source", default="hf", help="'hf' (default) or a local release directory")
     p.add_argument("--no-checkpoints", action="store_true", help="skip the ~12.7 GB of perception weights")
     p.add_argument("--gvlm", type=Path, default=None,
                    help="local copy of the official GVLM dataset (default: download its official archive)")
@@ -327,10 +317,11 @@ def main():
         print(f"Downloading DORA ({', '.join(parts)}) from {args.source} to {data_dir}")
         if args.source == "hf":
             download_hf(data_dir, parts)
-        elif args.source == "kaggle":
-            download_kaggle(data_dir, parts)
         else:
-            copy_tree(Path(args.source).expanduser().resolve(), data_dir, parts)
+            src = Path(args.source).expanduser().resolve()
+            if not src.is_dir():
+                sys.exit(f"--source must be 'hf' or a local release directory; {src} is not a directory")
+            copy_tree(src, data_dir, parts)
 
     manifest = json.loads((data_dir / MANIFEST).read_text(encoding="utf-8"))
     if args.gvlm is not None:

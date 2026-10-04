@@ -161,7 +161,7 @@ layers and perception checkpoints (~18 GB) into `./data` and verifies every file
 manifest:
 
 ```bash
-python scripts/prepare_data.py                    # Hugging Face (default); --source kaggle for the Kaggle mirror
+python scripts/prepare_data.py                    # Hugging Face (default); --source <dir> for a local copy
 python scripts/prepare_data.py --no-checkpoints   # skip the perception weights (~12.7 GB): enough to score runs with evaluate.py, not to run the agents
 python scripts/prepare_data.py --gvlm /path/to/GVLM   # GVLM from a local copy (default: its official archive)
 python scripts/prepare_data.py --rescuenet /path/to/RescueNet   # RescueNet originals from a local copy (default: figshare)
