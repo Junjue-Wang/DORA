@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -52,11 +53,23 @@ def sha256(path: Path, chunk: int = 1 << 24) -> str:
     return h.hexdigest()
 
 
-def download_hf(data_dir: Path, parts):
+def download_hf(data_dir: Path, parts, attempts: int = 5):
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")  # the hub default (10 s) is short for slow links
     from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError
 
-    snapshot_download(repo_id=HF_REPO, repo_type="dataset", revision=HF_REVISION, local_dir=data_dir,
-                      allow_patterns=[MANIFEST, *DOCS, *(f"{part}/*" for part in parts)], max_workers=8)
+    for attempt in range(1, attempts + 1):
+        try:
+            snapshot_download(repo_id=HF_REPO, repo_type="dataset", revision=HF_REVISION, local_dir=data_dir,
+                              allow_patterns=[MANIFEST, *DOCS, *(f"{part}/*" for part in parts)], max_workers=8)
+            return
+        except (RepositoryNotFoundError, RevisionNotFoundError, GatedRepoError):
+            raise
+        except Exception as e:  # dropped connections and timeouts: finished files are kept, the rest resumes
+            if attempt == attempts:
+                raise
+            print(f"  download interrupted ({type(e).__name__}: {e}); retrying ({attempt}/{attempts - 1})")
+            time.sleep(10 * attempt)
 
 
 def download_kaggle(data_dir: Path, parts):
@@ -241,7 +254,15 @@ def fetch_gvlm(data_dir: Path, manifest, cache_dir: Path):
     import_gvlm(out, data_dir, manifest)
 
 
-def verify(data_dir: Path, manifest, parts, check_hash: bool) -> bool:
+def failure_reason(e: Exception) -> str:
+    if isinstance(e, ImportError):
+        return f"missing Python package '{e.name}' (pip install -r requirements.txt)"
+    return f"{type(e).__name__}: {e}"
+
+
+def verify(data_dir: Path, manifest, parts, check_hash: bool, fetch_errors=None):
+    """Check every file of ``parts``; returns (no bad files, number of absent restricted files)."""
+    fetch_errors = fetch_errors or {}
     files = {k: v for k, v in manifest["files"].items() if k.split("/", 1)[0] in parts}
     bad, absent_restricted = [], {}
     for i, (rel, meta) in enumerate(sorted(files.items()), 1):
@@ -267,13 +288,13 @@ def verify(data_dir: Path, manifest, parts, check_hash: bool) -> bool:
     if absent_restricted:
         print(f"\nNot redistributed (tasks using these layers cannot be solved without them, "
               f"see {data_dir / 'LICENSE.md'}):")
-        hints = {"restricted:gvlm": f" -- re-run with network access, or download GVLM ({GVLM_URL}, e.g. its "
-                                    "Baidu link) and re-run with --gvlm <dir>",
-                 "restricted:rescuenet": f" -- re-run with network access, or download RescueNet ({RESCUENET_DOI}) "
-                                         "and re-run with --rescuenet <dir>"}
+        local = {"restricted:gvlm": f"download GVLM ({GVLM_URL}, e.g. its Baidu link) and re-run with --gvlm <dir>",
+                 "restricted:rescuenet": f"download RescueNet ({RESCUENET_DOI}) and re-run with --rescuenet <dir>"}
         for kind, rels in sorted(absent_restricted.items()):
-            print(f"  {kind}: {len(rels)} files{hints.get(kind, '')}")
-    return not bad
+            why = (f"fetching failed: {failure_reason(fetch_errors[kind])}" if kind in fetch_errors
+                   else "not fetched yet: re-run without --verify-only")
+            print(f"  {kind}: {len(rels)} files -- {why}; or {local.get(kind, 'see LICENSE.md')}")
+    return not bad, n_absent
 
 
 def main():
@@ -307,19 +328,24 @@ def main():
     manifest = json.loads((data_dir / MANIFEST).read_text(encoding="utf-8"))
     if args.gvlm is not None:
         import_gvlm(args.gvlm.expanduser().resolve(), data_dir, manifest)
+    fetch_errors = {}
     if "images" in parts and not args.verify_only:
         try:
             fetch_gvlm(data_dir, manifest, (args.cache_dir or data_dir / ".cache").expanduser().resolve())
         except Exception as e:  # e.g. Google Drive download quota: report it, verification lists what is missing
-            print(f"  GVLM: could not download the official archive ({e})")
+            fetch_errors["restricted:gvlm"] = e
+            print(f"  GVLM: could not fetch the official archive ({failure_reason(e)})")
         try:
             build_rescuenet(data_dir, manifest, args.rescuenet.expanduser().resolve() if args.rescuenet else None)
         except Exception as e:  # network or archive problem: report it, verification lists what is missing
-            print(f"  RescueNet: could not rebuild the images ({e})")
+            fetch_errors["restricted:rescuenet"] = e
+            print(f"  RescueNet: could not rebuild the images ({failure_reason(e)})")
 
-    ok = verify(data_dir, manifest, parts, check_hash=not args.no_hash)
+    ok, n_absent = verify(data_dir, manifest, parts, check_hash=not args.no_hash, fetch_errors=fetch_errors)
     if ok:
-        print(f"\nDORA data is ready. The release combines several public sources; see {data_dir / 'LICENSE.md'}\n"
+        status = ("DORA data is ready." if not n_absent else
+                  f"DORA data is ready except the {n_absent} files listed above (the tasks using them cannot run yet).")
+        print(f"\n{status} The release combines several public sources; see {data_dir / 'LICENSE.md'}\n"
               "for their licenses and required attributions (non-commercial research use).")
         if data_dir != DEFAULT_DATA.resolve():
             print(f"Point the code to it with:  export DORA_DATA={data_dir}")
