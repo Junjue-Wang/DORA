@@ -155,7 +155,7 @@ GDAL, PROJ and GEOS come with the `rasterio`/`pyogrio`/`shapely` wheels; no syst
 > once it is online.
 
 The Hugging Face dataset asks for a short access form (name, affiliation, email; granted
-automatically): request access on the [dataset page](https://huggingface.co/datasets/Kingdrone-Junjue/DORA),
+automatically): request access on the [dataset page](https://huggingface.co/datasets/UTokyo-AI4EO/DORA),
 then log in once with `hf auth login` (or set `HF_TOKEN`) using a Read token; a fine-grained token
 needs "Read access to contents of all public gated repos you can access". One command downloads the tasks, source
 layers and perception checkpoints (~18 GB) into `./data` and verifies every file against the release

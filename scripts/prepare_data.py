@@ -32,7 +32,7 @@ import time
 import zipfile
 from pathlib import Path
 
-HF_REPO = "Kingdrone-Junjue/DORA"         # Hugging Face dataset repo
+HF_REPO = "UTokyo-AI4EO/DORA"             # Hugging Face dataset repo
 HF_REVISION = "v1.0"                       # release tag
 MANIFEST = "manifest.json"
 DOCS = ["README.md", "LICENSE.md"]
