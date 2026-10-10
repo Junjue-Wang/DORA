@@ -3,7 +3,7 @@
 
     python scripts/prepare_data.py                      # Hugging Face Hub -> ./data  (~18 GB)
     python scripts/prepare_data.py --no-checkpoints     # skip the perception weights (~12.7 GB): enough to score runs with evaluate.py, not to run the agents
-    python scripts/prepare_data.py --source /path/to/DORA_v1.0      # local copy / offline mirror
+    python scripts/prepare_data.py --source /path/to/DORA          # local copy / offline mirror
     python scripts/prepare_data.py --gvlm /path/to/GVLM             # GVLM from a local copy instead of downloading it
     python scripts/prepare_data.py --rescuenet /path/to/RescueNet   # RescueNet originals from a local copy
     python scripts/prepare_data.py --verify-only        # re-check an existing data directory
@@ -33,7 +33,7 @@ import zipfile
 from pathlib import Path
 
 HF_REPO = "UTokyo-AI4EO/DORA"             # Hugging Face dataset repo
-HF_REVISION = "v1.0"                       # release tag
+HF_REVISION = "v1.1"                       # release tag
 MANIFEST = "manifest.json"
 DOCS = ["README.md", "LICENSE.md"]
 DEFAULT_DATA = Path(__file__).resolve().parents[1] / "data"

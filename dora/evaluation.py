@@ -89,6 +89,19 @@ def score_scalar(y_pred: Any, y_gold: Any,
     return 1.0 if abs(yp - yg) <= tau_a + tau_r * abs(yg) else 0.0
 
 
+def _score_form_tolerant(p_f: float, g_f: float, tau_r: Optional[float] = None, tau_a: float = 0.0) -> float:
+    """Score a ratio that may be given as a fraction (0.55) or a percentage (55).
+
+    The raw value and the value rescaled to the gold's form (x100 or /100) are both tried and the
+    better score is kept, so a genuine ratio above 1.5 (e.g. a detour factor of 1.6) is not taken
+    for a percentage."""
+    best = score_scalar(p_f, g_f, tau_r, tau_a)
+    gold_in_fraction, pred_in_fraction = abs(g_f) <= 1.5, abs(p_f) <= 1.5
+    if gold_in_fraction != pred_in_fraction:
+        best = max(best, score_scalar(p_f / 100.0 if gold_in_fraction else p_f * 100.0, g_f, tau_r, tau_a))
+    return best
+
+
 _BOOL_YES = {"true", "yes"}
 _BOOL_NO = {"false", "no"}
 
@@ -215,8 +228,12 @@ def _normalize_dict_key(k: Any) -> str:
 
 def score_scalar_dict(y_pred: Any, y_gold: Any,
                       tau_r: Optional[float] = None,
-                      tau_a: Optional[float] = None) -> float:
-    """Per-key scalar scoring averaged over key union, with key normalization."""
+                      tau_a: Optional[float] = None,
+                      gsd_m: Optional[float] = None) -> float:
+    """Per-key scalar scoring averaged over the gold keys, with key normalization.
+
+    Identifier keys (``*_id``) must match exactly; latitude/longitude keys use the point tolerance
+    (TAU_GEO_PX pixels at the scene GSD, in degrees) instead of a relative one."""
     if tau_r is None:
         tau_r = TAU_R
     if tau_a is None:
@@ -245,19 +262,18 @@ def score_scalar_dict(y_pred: Any, y_gold: Any,
             # passing all predictions against small ratio values (e.g. 0.1944).
             g_val = y_gold[k]
             p_val = y_pred[k]
+            if k == "id" or k.endswith("_id") or k.endswith("osmid"):
+                scores.append(score_exact(p_val, g_val))
+                continue
             try:
                 g_f = float(g_val)
                 p_f = float(p_val)
-                gold_in_fraction = abs(g_f) <= 1.5
-                pred_in_fraction = abs(p_f) <= 1.5
-                if gold_in_fraction != pred_in_fraction:
-                    # Form mismatch — normalize pred to gold's form
-                    if gold_in_fraction and not pred_in_fraction:
-                        p_f = p_f / 100.0
-                    else:
-                        p_f = p_f * 100.0
-                effective_tau_a = 0.0 if gold_in_fraction else tau_a
-                scores.append(score_scalar(p_f, g_f, tau_r, effective_tau_a))
+                if re.search(r"(^|_)(lat|latitude|lon|lng|longitude)$", k):
+                    tol_m = TAU_GEO_PX * gsd_m if gsd_m else TAU_GEO_FALLBACK
+                    scores.append(1.0 if abs(p_f - g_f) <= tol_m / 111_320.0 else 0.0)
+                    continue
+                effective_tau_a = 0.0 if abs(g_f) <= 1.5 else tau_a
+                scores.append(_score_form_tolerant(p_f, g_f, tau_r, effective_tau_a))
             except (TypeError, ValueError):
                 scores.append(score_scalar(p_val, g_val, tau_r, tau_a))
         else:
@@ -549,19 +565,12 @@ def score_task_answer(
                             v = v.strip().rstrip('%').strip()
                         return float(v)
                     if y_p is not None and y_g is not None:
-                        p_f = _parse_ratio(y_p)
-                        g_f = _parse_ratio(y_g)
-                        gold_in_fraction = abs(g_f) <= 1.5
-                        pred_in_fraction = abs(p_f) <= 1.5
-                        if gold_in_fraction != pred_in_fraction:
-                            if gold_in_fraction and not pred_in_fraction:
-                                p_f = p_f / 100.0
-                            else:
-                                p_f = p_f * 100.0
-                        y_p, y_g = p_f, g_f
+                        y_p, y_g = _parse_ratio(y_p), _parse_ratio(y_g)
+                        field_scores[field] = _score_form_tolerant(y_p, y_g)
                 except (TypeError, ValueError):
                     pass
-                field_scores[field] = score_scalar(y_p, y_g, tau_a=0.0)
+                if field not in field_scores:
+                    field_scores[field] = score_scalar(y_p, y_g, tau_a=0.0)
             else:
                 field_scores[field] = score_scalar(y_pred, y_gold)
 
@@ -580,28 +589,19 @@ def score_task_answer(
                         v = v.strip().rstrip('%').strip()
                     return float(v)
                 if y_p is not None and y_g is not None:
-                    p_f = _parse_ratio(y_p)
-                    g_f = _parse_ratio(y_g)
-                    # Use gold's magnitude to decide expected form.
-                    # Threshold 1.5 handles values like "1.2x growth ratio".
-                    gold_in_fraction = abs(g_f) <= 1.5
-                    pred_in_fraction = abs(p_f) <= 1.5
-                    if gold_in_fraction != pred_in_fraction:
-                        # Form mismatch — rescale pred to match gold's form.
-                        if gold_in_fraction and not pred_in_fraction:
-                            p_f = p_f / 100.0  # pred was percent, convert to fraction
-                        else:
-                            p_f = p_f * 100.0  # pred was fraction, convert to percent
-                    y_p, y_g = p_f, g_f
+                    # Fraction (0.65) or percent (65): both forms are tried against the gold.
+                    y_p, y_g = _parse_ratio(y_p), _parse_ratio(y_g)
+                    field_scores[field] = _score_form_tolerant(y_p, y_g)
             except (TypeError, ValueError):
                 pass
-            field_scores[field] = score_scalar(y_p, y_g, tau_a=0.0)
+            if field not in field_scores:
+                field_scores[field] = score_scalar(y_p, y_g, tau_a=0.0)
 
         elif etype == "exact_match":
             field_scores[field] = score_exact(y_pred, y_gold)
 
         elif etype == "scalar_dict":
-            field_scores[field] = score_scalar_dict(y_pred, y_gold)
+            field_scores[field] = score_scalar_dict(y_pred, y_gold, gsd_m=gsd_m)
 
         elif etype == "set_f1":
             field_scores[field] = score_set_f1(y_pred, y_gold)

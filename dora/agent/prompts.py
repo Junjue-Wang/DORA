@@ -3,7 +3,7 @@
 AP (autonomous planning) and IF (instruction following) share one template; IF only adds
 the gold tool-name sequence. The whole prompt is sent as a single user message.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _GUIDELINES_AND_FORMAT = '''
 GUIDELINES:
@@ -78,7 +78,9 @@ def format_trajectory_hint(trajectory: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def answer_fields_hint(eval_spec: Dict[str, str]) -> str:
+def answer_fields_hint(eval_spec: Dict[str, str], answer_format: Optional[Dict[str, str]] = None) -> str:
+    """One line per scored field: name, type and any format note from the task (``answer_format``, e.g. which dict keys to use)."""
+    answer_format = answer_format or {}
     fields = []
     for field, field_type in (eval_spec or {}).items():
         if field_type == "ignore":
@@ -94,7 +96,8 @@ def answer_fields_hint(eval_spec: Dict[str, str]) -> str:
                 dtype = "float (match the field-name suffix: _ratio=[0,1], _pct=[0,100])"
         else:
             dtype = _TYPE_DISPLAY.get(field_type, field_type)
-        fields.append(f'  - "{field}": {dtype}')
+        keys = answer_format.get(field)
+        fields.append(f'  - "{field}": {dtype}' + (f"; {keys}" if keys else ""))
     if not fields:
         return ""
     return "ANSWER_FIELDS (your <Answer> must be a JSON object with exactly these keys):\n" + "\n".join(fields)
@@ -103,7 +106,7 @@ def answer_fields_hint(eval_spec: Dict[str, str]) -> str:
 def build_prompt(question: Dict[str, Any], autoplanning: bool = True) -> str:
     """Full user message for one question."""
     parts = [question["question"], "", question["context"]]
-    hint = answer_fields_hint(question.get("eval_spec", {}))
+    hint = answer_fields_hint(question.get("eval_spec", {}), question.get("answer_format"))
     if hint:
         parts += ["", hint]
     trajectory_hint = ""

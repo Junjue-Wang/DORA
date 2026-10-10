@@ -87,6 +87,7 @@ def load_questions(task: str, tasks_dir: Path = TASKS_DIR, images_dir: Path = IM
                 "context": context,
                 "input_data": metadata.get("input_data", {}),
                 "eval_spec": t.get("eval_spec", {}),
+                "answer_format": t.get("answer_format", {}),
                 "tools": t.get("tools", []),
                 "expected_trajectory": t.get("trajectory", []),
             })

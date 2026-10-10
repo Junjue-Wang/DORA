@@ -169,7 +169,8 @@ def _tool_guard(tool_name: str):
                 if "clip" in tool_name:
                     empty.update({"clip_path": None, "input_count": 0, "output_count": 0})
                 elif "intersect" in tool_name:
-                    empty.update({"intersection_count": 0, "intersection_area_m2": 0.0, "intersection_path": None})
+                    empty.update({"intersection_count": 0, "intersecting_a_count": 0, "intersecting_b_count": 0,
+                                  "intersection_area_m2": 0.0, "intersection_path": None})
                 elif "nearest" in tool_name:
                     empty.update({"pair_count": 0, "table_path": None, "links_geojson": None})
                 elif "filter" in tool_name:
@@ -1943,9 +1944,58 @@ def vec_connected_components(vector_path: str) -> str:
 
 
 
+def _metric_frame(gdf, pixel_size_m=None):
+    """(layer, metres per coordinate unit) for measuring a vector layer.
+
+    Pixel-space layers (no CRS) are scaled by ``pixel_size_m``; projected layers are measured in
+    their own units (metres for UTM), ignoring ``pixel_size_m``; geographic layers are projected
+    to their UTM zone first."""
+    if gdf.crs is None:
+        return gdf, (float(pixel_size_m) if pixel_size_m is not None else None)
+    if gdf.crs.is_geographic:
+        return gdf.to_crs(gdf.estimate_utm_crs()), 1.0
+    return gdf, float(gdf.crs.axis_info[0].unit_conversion_factor or 1.0)
+
+
+def _merge_overlapping(gdf):
+    """Merge polygon features of one layer that overlap each other (e.g. per-feature buffers), so an
+    intersection with them is not counted or measured twice. Features that only touch are kept apart.
+    A merged feature keeps the attributes of its largest member."""
+    import pandas as pd
+    import shapely
+
+    if len(gdf) < 2 or not gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
+        return gdf
+    geoms = list(gdf.geometry)
+    parent = list(range(len(geoms)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    left, right = gdf.sindex.query(gdf.geometry, predicate="intersects")
+    for i, j in zip(left, right):
+        if i < j and geoms[i].intersection(geoms[j]).area > 0:
+            parent[root(i)] = root(j)
+    groups = {}
+    for i in range(len(geoms)):
+        groups.setdefault(root(i), []).append(i)
+    if len(groups) == len(geoms):
+        return gdf
+    members = sorted(groups.values())
+    attrs = gdf.drop(columns=gdf.geometry.name)
+    rows = [attrs.iloc[max(m, key=lambda i: geoms[i].area)] for m in members]
+    merged = [shapely.union_all([geoms[i] for i in m]) if len(m) > 1 else geoms[m[0]] for m in members]
+    return gpd.GeoDataFrame(pd.DataFrame(rows).reset_index(drop=True), geometry=merged, crs=gdf.crs)
+
+
 @mcp.tool(name="vec.intersect", description='''
 Description:
-Find intersection between two vector datasets (GeoJSON) using vector overlay.
+Find intersection between two vector datasets (GeoJSON) using vector overlay. Features of one layer
+that overlap each other (e.g. per-feature buffers) are merged first, so nothing is counted or
+measured twice.
 
 Parameters:
 - vector_a_path (str): Path to first vector GeoJSON
@@ -1953,7 +2003,10 @@ Parameters:
 - pixel_size_m (float, optional): Pixel size to compute area_m2 if geometry area is in pixel units
 
 Returns:
-- intersection_count (int): Number of intersecting regions
+- intersection_count (int): Number of intersection pieces (one per pair of intersecting features)
+- intersecting_a_count (int): Number of features of the first dataset that intersect the second
+  (e.g. buildings hit by a flood layer passed second)
+- intersecting_b_count (int): Number of features of the second dataset that intersect the first
 - intersection_area_m2 (float): Total intersection area in square meters
 - intersection_path (str): Path to intersection GeoJSON
 ''')
@@ -2001,6 +2054,8 @@ def vec_intersect(vector_a_path: str, vector_b_path: str, pixel_size_m: float = 
         return {
             "tool": "vec.intersect",
             "intersection_count": 0,
+            "intersecting_a_count": 0,
+            "intersecting_b_count": 0,
             "intersection_area_px2": 0.0,
             "intersection_area_m2": 0.0 if pixel_size_m is not None else None,
             "pixel_size_m": float(pixel_size_m) if pixel_size_m is not None else None,
@@ -2012,13 +2067,23 @@ def vec_intersect(vector_a_path: str, vector_b_path: str, pixel_size_m: float = 
     if gdf_a.crs and gdf_b.crs and gdf_a.crs != gdf_b.crs:
         gdf_b = gdf_b.to_crs(gdf_a.crs)
 
+    gdf_a = _merge_overlapping(gdf_a).reset_index(drop=True)
+    gdf_b = _merge_overlapping(gdf_b).reset_index(drop=True)
+    gdf_a["_a_feature"] = range(len(gdf_a))
+    gdf_b["_b_feature"] = range(len(gdf_b))
     inter = gpd.overlay(gdf_a, gdf_b, how="intersection", keep_geom_type=True)
+    inter = inter[~inter.geometry.is_empty]
+    a_hits = int(inter["_a_feature"].nunique()) if not inter.empty else 0
+    b_hits = int(inter["_b_feature"].nunique()) if not inter.empty else 0
+    inter = inter.drop(columns=["_a_feature", "_b_feature"], errors="ignore")
     if inter.empty:
         out_name = _short_name(Path(vector_a_path).stem, Path(vector_b_path).stem, "intersection")
         out_path = _save_gdf(inter, out_name)
         return {
             "tool": "vec.intersect",
             "intersection_count": 0,
+            "intersecting_a_count": 0,
+            "intersecting_b_count": 0,
             "intersection_area_px2": 0.0,
             "intersection_area_m2": 0.0 if pixel_size_m is not None else None,
             "pixel_size_m": float(pixel_size_m) if pixel_size_m is not None else None,
@@ -2039,20 +2104,27 @@ def vec_intersect(vector_a_path: str, vector_b_path: str, pixel_size_m: float = 
                 except Exception:
                     pass
 
-    inter["area_px2"] = inter.geometry.area.astype(float)
+    metric, scale = _metric_frame(inter, px)
+    if inter.crs is None:  # pixel space
+        inter["area_px2"] = inter.geometry.area.astype(float)
+        inter["area_m2"] = (inter["area_px2"] * (px ** 2)).astype(float) if px is not None else None
+    else:  # georeferenced: measured in metres, whatever pixel_size_m says
+        inter["area_m2"] = (metric.geometry.area * scale ** 2).astype(float).values
+        inter["area_px2"] = (inter["area_m2"] / px ** 2) if px else None
     inter["pixel_size_m"] = px
-    inter["area_m2"] = (inter["area_px2"] * (px ** 2)).astype(float) if px is not None else None
 
     out_name = _short_name(Path(vector_a_path).stem, Path(vector_b_path).stem, "intersection")
     inter_path = _save_gdf(inter, out_name)
 
     intersection_count = int(len(inter))
-    area_px2_sum = float(inter["area_px2"].sum()) if intersection_count > 0 else 0.0
-    area_m2_sum = float(inter["area_m2"].sum()) if (px is not None and intersection_count > 0) else None
+    area_px2_sum = float(inter["area_px2"].sum()) if inter["area_px2"].notna().all() else None
+    area_m2_sum = float(inter["area_m2"].sum()) if inter["area_m2"].notna().all() else None
 
     result = {
         "tool": "vec.intersect",
         "intersection_count": intersection_count,
+        "intersecting_a_count": a_hits,
+        "intersecting_b_count": b_hits,
         "intersection_area_px2": area_px2_sum,
         "intersection_area_m2": area_m2_sum,
         "pixel_size_m": px,
@@ -2094,7 +2166,8 @@ def vec_max_polygon(vector_path: str, pixel_size_m: float = None, topk: int = 1)
         max_pixels = 0
     else:
         if "area_m2" not in gdf or gdf["area_m2"].isna().all():
-            gdf["area_m2"] = gdf.geometry.area * (pixel_size_m ** 2 if pixel_size_m else 1)
+            metric, scale = _metric_frame(gdf, pixel_size_m)
+            gdf["area_m2"] = (metric.geometry.area * (scale ** 2 if scale else 1)).values
 
         if "pixel_count" not in gdf:
             gdf["pixel_count"] = None
@@ -2120,13 +2193,13 @@ def vec_max_polygon(vector_path: str, pixel_size_m: float = None, topk: int = 1)
     return result
 
 
-def vec_centroid(vector_path: str, feature_idx: int = 0) -> str:
+def vec_centroid(vector_path: str, feature_idx: int = 0, raster_path: str = None) -> str:
     """
     Calculate the centroid of a polygon/point feature.
 
     Parameters:
     - vector_path: Path to vector GeoJSON
-    - feature_idx: Index of feature to get centroid for (default: 0, the largest)
+    - feature_idx: Index of feature to get centroid for (default: 0, the first; -1: the largest)
 
     Returns:
     - centroid: {lat, lon} or {pixel_row, pixel_col} depending on whether the vector has CRS
@@ -2163,9 +2236,18 @@ def vec_centroid(vector_path: str, feature_idx: int = 0) -> str:
     }
 
     if has_crs:
-        # Return latitude/longitude for geographic CRS
-        result["latitude"] = float(centroid.y)
-        result["longitude"] = float(centroid.x)
+        # Return latitude/longitude (WGS84) for georeferenced vectors
+        ll = gpd.GeoSeries([centroid], crs=gdf.crs).to_crs("EPSG:4326").iloc[0]
+        result["latitude"] = float(ll.y)
+        result["longitude"] = float(ll.x)
+        if raster_path:  # pixel position in the grid of a reference raster
+            import rasterio
+            with rasterio.open(raster_path) as src:
+                if src.crs is not None:
+                    xy = gpd.GeoSeries([centroid], crs=gdf.crs).to_crs(src.crs).iloc[0]
+                    col, row = ~src.transform * (xy.x, xy.y)
+                    result["pixel_row"] = float(row)
+                    result["pixel_col"] = float(col)
     else:
         # Return pixel_row/pixel_col for pixel coordinates (no CRS)
         result["pixel_row"] = float(centroid.y)
@@ -2183,17 +2265,20 @@ Useful for finding the center point of the largest damaged area (explosion cente
 
 Parameters:
 - vector_path (str): Path to input vector GeoJSON
-- feature_idx (int): Index of feature to get centroid for (default: 0, use -1 for largest)
+- feature_idx (int): Index of feature to get centroid for (default: 0, the first feature; use -1 for the largest)
+- raster_path (str, optional): reference GeoTIFF; for a georeferenced vector, also return the centroid's
+  pixel_row / pixel_col in this raster's grid
 
 Returns:
 - feature_idx (int): The feature index used
 - geometry_type (str): Type of the original geometry
 - If vector has CRS: latitude (float), longitude (float) in WGS84
 - If vector has no CRS: pixel_row (float), pixel_col (float) in pixel coordinates
+- If vector has CRS and raster_path is given: also pixel_row, pixel_col in the raster's grid
 ''')
 @_tool_guard("vec.centroid")
-def vec_centroid_tool(vector_path: str, feature_idx: int = 0) -> str:
-    result = vec_centroid(vector_path, feature_idx)
+def vec_centroid_tool(vector_path: str, feature_idx: int = 0, raster_path: str = None) -> str:
+    result = vec_centroid(vector_path, feature_idx, raster_path)
     if isinstance(result, str):
         return result
     return json.dumps(result, ensure_ascii=False)
@@ -2229,7 +2314,7 @@ def vec_pixel_to_world(raster_path: str, pixel_row: int, pixel_col: int) -> str:
             # Convert pixel to world coordinates
             # rasterio uses (col, row) order for pixel_inverse
             world_x = transform[2] + transform[0] * pixel_col + transform[1] * pixel_row
-            world_y = transform[5] + transform[4] * pixel_col + transform[3] * pixel_row
+            world_y = transform[5] + transform[3] * pixel_col + transform[4] * pixel_row
 
             # If CRS is not WGS84, convert
             if src.crs is not None and src.crs.to_epsg() != 4326:
@@ -2249,6 +2334,14 @@ def vec_pixel_to_world(raster_path: str, pixel_row: int, pixel_col: int) -> str:
             }
     except Exception as e:
         return _stub_result("vec.pixel_to_world", error=str(e))
+
+
+def _buffer_metres(gdf, dist):
+    """Buffer by ``dist`` layer units; a geographic layer is buffered in metres in its UTM zone."""
+    if gdf.crs is not None and gdf.crs.is_geographic:
+        utm = gdf.estimate_utm_crs()
+        return gdf.to_crs(utm).geometry.buffer(dist).to_crs(gdf.crs)
+    return gdf.geometry.buffer(dist)
 
 
 @mcp.tool(name="vec.buffer", description='''
@@ -2286,7 +2379,7 @@ def vec_buffer(vector_path: str, meter: float) -> str:
         buffer_dist = meter / px_size  # convert meters to pixel units
 
     buffered = gdf.copy()
-    buffered["geometry"] = gdf.geometry.buffer(buffer_dist)
+    buffered["geometry"] = _buffer_metres(gdf, buffer_dist)
     buffered["pixel_size_m"] = buffered.get("pixel_size_m", px_size)
     buffered["buffer_input_m"] = meter
     buffered["buffer_used_units"] = buffer_dist
@@ -2338,7 +2431,7 @@ def vec_kbuffer(vector_path: str, meters: ListFloat) -> str:
             buffer_dist = dist / px_size
 
         buffered = gdf.copy()
-        buffered["geometry"] = gdf.geometry.buffer(buffer_dist)
+        buffered["geometry"] = _buffer_metres(gdf, buffer_dist)
         buffered["pixel_size_m"] = buffered.get("pixel_size_m", px_size)
         buffered["buffer_input_m"] = dist
         buffered["buffer_used_units"] = buffer_dist
@@ -2394,32 +2487,27 @@ def road_centerline_extraction(mask_path: str,
     if damaged_classes is None:
         damaged_classes = [2, 3]
 
-    # Try rasterio first to preserve CRS / geo-transform from GeoTIFF;
-    # fall back to skimage.imread for plain images (PNG, JPEG, etc.).
-    geo_transform = None
-    geo_crs = None
+    # The centerlines stay in the pixel frame of the mask, also for georeferenced masks:
+    # vec.build_graph and vec.graph_shortest_path work in pixel (row, col) coordinates.
     mask = None
     try:
         import rasterio as rio
 
         with rio.open(mask_path) as src:
-            if src.crs is not None:
-                geo_crs = src.crs
-                geo_transform = src.transform
-            mask = src.read(1)
+            mask = src.read(1) if src.count < 3 else np.moveaxis(src.read([1, 2, 3]), 0, -1)
     except Exception:
         pass
 
     if mask is None:
         mask = imread(mask_path)
     if mask.ndim == 3:
-        mask = color2labelidx(mask)
+        mask = color2labelidx(mask[..., :3])
 
     road_all = np.isin(mask, intact_classes + damaged_classes)
     damage_mask = np.isin(mask, damaged_classes)
 
     G = _build_road_graph(road_all, damage_mask)
-    center_gdf = _graph_edges_to_centerline_gdf(G, transform=geo_transform, crs=geo_crs)
+    center_gdf = _graph_edges_to_centerline_gdf(G)
     center_path = _save_gdf(center_gdf, "road_centerline.geojson")
 
     result = {
@@ -2716,12 +2804,10 @@ def vec_length(vector_path: str, pixel_size_m: float = None) -> str:
     if "id" not in gdf.columns:
         gdf["id"] = list(range(1, len(gdf) + 1))
 
-    if pixel_size_m is not None:
-        gdf["length_m"] = gdf.geometry.length * pixel_size_m
-    else:
-        if gdf.crs is None:
-            raise ValueError("Need pixel_size_m for pixel-space vectors.")
-        gdf["length_m"] = gdf.geometry.length
+    metric, scale = _metric_frame(gdf, pixel_size_m)
+    if scale is None:
+        raise ValueError("Need pixel_size_m for pixel-space vectors.")
+    gdf["length_m"] = (metric.geometry.length * scale).values
 
     total_len = float(gdf["length_m"].sum())
     _h = hashlib.md5(vector_path.encode("utf-8")).hexdigest()[:6]
@@ -2760,9 +2846,10 @@ def vec_perimeter(vector_path: str, pixel_size_m: float = None) -> str:
     if "id" not in gdf.columns:
         gdf["id"] = list(range(1, len(gdf) + 1))
 
-    if pixel_size_m is None:
+    metric, scale = _metric_frame(gdf, pixel_size_m)
+    if scale is None:
         raise ValueError("vec.perimeter: pixel-space vectors require pixel_size_m.")
-    gdf["perimeter_m"] = gdf.geometry.length * pixel_size_m
+    gdf["perimeter_m"] = (metric.geometry.length * scale).values
 
     total_p = float(gdf["perimeter_m"].sum())
     _h = hashlib.md5(vector_path.encode("utf-8")).hexdigest()[:6]
@@ -2984,7 +3071,11 @@ def vec_filter_by_area(vector_path: str, min_area_m2: float, pixel_size_m: float
     else:
         px = float(pixel_size_m)
 
-    area_m2 = gdf.geometry.area * (px ** 2)
+    if gdf.crs is None:
+        area_m2 = gdf.geometry.area * (px ** 2)
+    else:  # georeferenced: measured in metres
+        metric, scale = _metric_frame(gdf)
+        area_m2 = gpd.GeoSeries(metric.geometry.values, index=gdf.index).area * scale ** 2
     out = gdf[area_m2 >= float(min_area_m2)].copy()
 
     out["area_m2"] = area_m2.loc[out.index].astype(float)
@@ -3162,6 +3253,8 @@ def vec_filter_by_distance_tool(vector_path: str, center_lat: float, center_lon:
     - links_geojson (str|None): GeoJSON of A–B nearest connectors
     - pair_count (int)
     - pixel_size_m (float|None)
+    - distance_px / distance_m (float): distance of the closest pair overall (minimum over all A)
+    - nearest_a_id / nearest_b_id (int): ids of that closest pair
     """)
 @_tool_guard("vec.nearest")
 def vec_polygon_nearest(vector_a_path: str,
@@ -3203,7 +3296,10 @@ def vec_polygon_nearest(vector_a_path: str,
     if "id" not in gdf_b.columns:
         gdf_b["id"] = list(range(1, len(gdf_b) + 1))
 
-    sindex_b = gdf_b.sindex
+    # metres per coordinate unit: the pixel size in pixel space; georeferenced layers in metres
+    gdf_a, unit_m = _metric_frame(gdf_a, px)
+    if gdf_a.crs is not None and gdf_b.crs is not None:
+        gdf_b = gdf_b.to_crs(gdf_a.crs)
 
     rows = []
     link_geoms = []
@@ -3213,11 +3309,8 @@ def vec_polygon_nearest(vector_a_path: str,
         if a_geom is None or a_geom.is_empty:
             continue
 
-        cand_idx = list(sindex_b.intersection(a_geom.bounds))
-        cand = gdf_b.iloc[cand_idx] if cand_idx else gdf_b
-
         dists = []
-        for _, b_row in cand.iterrows():
+        for _, b_row in gdf_b.iterrows():
             b_geom = b_row.geometry
             if b_geom is None or b_geom.is_empty:
                 continue
@@ -3231,7 +3324,11 @@ def vec_polygon_nearest(vector_a_path: str,
         for rank, (dist_px, b_row) in enumerate(dists[:topk], start=1):
             p_a, p_b = nearest_points(a_geom, b_row.geometry)
 
-            dist_m = float(dist_px * px) if px is not None else None
+            if gdf_a.crs is None:
+                dist_m = float(dist_px * px) if px is not None else None
+            else:
+                dist_m = float(dist_px * unit_m)
+                dist_px = dist_m / px if px else None
 
             rows.append({
                 "a_id": int(a_row["id"]),
@@ -3266,9 +3363,12 @@ def vec_polygon_nearest(vector_a_path: str,
         link_gdf = gpd.GeoDataFrame(df, geometry=link_geoms, crs=None)
         link_path = _save_gdf(link_gdf, "vec_nearest_links.geojson")
 
+    best = min(rows, key=lambda r: r["distance_m"] if r["distance_m"] is not None else r["distance_px"])  # closest pair overall
     return {
-        "distance_px": dist_px,
-        "distance_m": dist_m,
+        "distance_px": best["distance_px"],
+        "distance_m": best["distance_m"],
+        "nearest_a_id": best["a_id"],
+        "nearest_b_id": best["b_id"],
         "tool": "vec.nearest",
         "mode": "euclidean",
         "topk": topk,
