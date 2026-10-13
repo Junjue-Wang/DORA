@@ -40,6 +40,7 @@ DORA (**D**isaster **O**perational **R**esponse **A**gent benchmark) includes 51
 
 ## News
 
+- 2026/10/10, DORA v1.1: an audit of v1.0 corrected specifications and updated the evaluator. Scores change slightly, so the leaderboard will be updated to v1.1.
 - 2026/09/29, Code, the 108-tool MCP library, the data preparation script and the evaluator are released. The data and perception checkpoints are coming soon.
 - 2026/09/25, Our paper got accepted by NeurIPS 2026 (Evaluations & Datasets Track) as an **oral** presentation.
 - 2026/05/12, Our paper is available on [arXiv](https://arxiv.org/abs/2605.11633).
