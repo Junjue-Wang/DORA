@@ -40,6 +40,13 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 
 GPT_MODEL = "gpt-5.4-nano"
 
+# DORA_SUMMARIZE_MODEL makes one model answer every model.summarize call, whatever model the agent asks for:
+# a GPT or Gemini model through its own API, any other model through an OpenAI-compatible endpoint at
+# DORA_SUMMARIZE_BASE_URL (default OpenRouter) with the key in DORA_SUMMARIZE_API_KEY or OPENROUTER_API_KEY,
+# e.g. DORA_SUMMARIZE_MODEL=anthropic/claude-opus-5.5.
+SUMMARIZE_BASE_URL = "https://openrouter.ai/api/v1"
+SUMMARIZE_MAX_SIDE = 1568   # long side (px) of the images sent through that endpoint
+
 
 def _normalize_uint8(arr: np.ndarray) -> np.ndarray:
     arr = np.asarray(arr)
@@ -86,7 +93,7 @@ def _image_to_part(image_path: str):
     return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/png")
 
 
-def _image_to_data_url(image_path: str) -> str:
+def _image_to_data_url(image_path: str, max_side: Optional[int] = None) -> str:
     img = Image.open(image_path)
     arr = np.array(img)
 
@@ -106,6 +113,8 @@ def _image_to_data_url(image_path: str) -> str:
         raise ValueError(f"Unsupported image rank: {arr.ndim}")
 
     display_img = Image.fromarray(arr, mode="RGB")
+    if max_side:
+        display_img.thumbnail((max_side, max_side))
     buf = io.BytesIO()
     display_img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -263,6 +272,68 @@ def _call_gpt(
         raise ValueError("Unable to extract text from GPT response")
     except Exception as e:
         raise RuntimeError(f"OpenAI GPT API call failed: {e}")
+
+
+def _json_text(text: str) -> str:
+    """The JSON object of a reply, also when it comes wrapped in a code fence or prose."""
+    t = text.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
+    if fence:
+        t = fence.group(1).strip()
+    if not t.startswith("{") and "{" in t and "}" in t:
+        t = t[t.find("{"): t.rfind("}") + 1]
+    return t
+
+
+def _call_openai_compatible(
+    prompt: str,
+    image_paths: OptListStr = None,
+    model: str = "",
+    temperature: float = 0.2,
+) -> str:
+    """Call a model behind an OpenAI-compatible endpoint (DORA_SUMMARIZE_BASE_URL) for JSON text."""
+    if not OPENAI_OK:
+        raise ImportError("openai is not installed. Install with: pip install openai")
+    api_key = os.environ.get("DORA_SUMMARIZE_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("DORA_SUMMARIZE_API_KEY (or OPENROUTER_API_KEY) environment variable not set")
+    client = OpenAI(base_url=os.environ.get("DORA_SUMMARIZE_BASE_URL") or SUMMARIZE_BASE_URL, api_key=api_key)
+
+    image_paths = [p for p in (image_paths or []) if isinstance(p, str) and os.path.exists(p)]
+    user_content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for image_path in image_paths:
+        try:
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_to_data_url(image_path, max_side=SUMMARIZE_MAX_SIDE)},
+                }
+            )
+        except Exception:
+            continue
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            max_tokens=8192,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return a single valid JSON object and no extra prose.",
+                },
+                {
+                    "role": "user",
+                    "content": user_content,
+                },
+            ],
+        )
+        text = resp.choices[0].message.content if resp.choices else None
+        if isinstance(text, str) and text.strip():
+            return _json_text(text)
+        raise ValueError(f"Unable to extract text from {model} response")
+    except Exception as e:
+        raise RuntimeError(f"{model} API call failed: {e}")
 
 
 def _is_gpt_model(model: str) -> bool:
@@ -849,6 +920,14 @@ def model_summarize(
     """
     Use LLM to generate a summary of disaster analysis results.
     """
+    override = os.environ.get("DORA_SUMMARIZE_MODEL", "").strip()
+    model = override or model
+    if _is_gpt_model(model):
+        backend = "gpt"
+    elif override and not model.lower().startswith("gemini"):
+        backend = "openai_compatible"
+    else:
+        backend = "gemini"
     compact_trajectory = _compact_trajectory(trajectory)
     prominent_statistics = _extract_prominent_statistics(compact_trajectory)
     valid_image_paths = [p for p in (image_paths or []) if isinstance(p, str) and os.path.exists(p)]
@@ -862,8 +941,10 @@ def model_summarize(
     )
 
     try:
-        if _is_gpt_model(model):
+        if backend == "gpt":
             response = _call_gpt(prompt, image_paths=valid_image_paths, model=model)
+        elif backend == "openai_compatible":
+            response = _call_openai_compatible(prompt, image_paths=valid_image_paths, model=model)
         else:
             if not GENAI_OK:
                 raise ImportError("google-genai not installed")
@@ -895,7 +976,7 @@ def model_summarize(
         fallback = _build_fallback_summary(task_question, prominent_statistics, valid_image_paths)
         fallback.update({
             "tool": "model.summarize",
-            "status": "stub" if (not _is_gpt_model(model) and not GENAI_OK) or (_is_gpt_model(model) and not OPENAI_OK) else "error",
+            "status": "stub" if (backend == "gemini" and not GENAI_OK) or (backend != "gemini" and not OPENAI_OK) else "error",
             "error": str(e),
             "model": model,
             "image_input_count": len(valid_image_paths),

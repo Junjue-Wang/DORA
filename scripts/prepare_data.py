@@ -19,7 +19,8 @@ Two sources are not redistributed and are fetched from their official releases i
 scenes (the official archive, 1.05 GB, is downloaded once into the cache directory and the scenes
 are copied as released) and the ten downsampled RescueNet images (rebuilt from the originals, read
 from the authors' figshare record with HTTP range requests). ``--gvlm`` / ``--rescuenet`` use local
-copies instead.
+copies instead. The rebuilt RescueNet images are checked by format and size rather than bytes: their
+pixels depend slightly on the OpenCV/libjpeg build.
 """
 import argparse
 import hashlib
@@ -259,6 +260,17 @@ def failure_reason(e: Exception) -> str:
     return f"{type(e).__name__}: {e}"
 
 
+def rescuenet_image_ok(path: Path) -> bool:
+    """A rebuilt RescueNet image is an RGB PNG of the released size; its bytes can differ from the
+    release (the JPEG round trip of build_rescuenet depends on the OpenCV/libjpeg build)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.format == "PNG" and im.mode == "RGB" and im.size == RESCUENET_SIZE
+    except Exception:
+        return False
+
+
 def verify(data_dir: Path, manifest, parts, check_hash: bool, fetch_errors=None):
     """Check every file of ``parts``; returns (no bad files, number of absent restricted files)."""
     fetch_errors = fetch_errors or {}
@@ -272,6 +284,9 @@ def verify(data_dir: Path, manifest, parts, check_hash: bool, fetch_errors=None)
                 absent_restricted.setdefault(meta.get("license", ""), []).append(rel)
             else:
                 bad.append((rel, "missing"))
+        elif meta.get("license") == "restricted:rescuenet":
+            if not rescuenet_image_ok(path):
+                bad.append((rel, "not a rebuilt RescueNet image (RGB PNG, 896x672)"))
         elif path.stat().st_size != meta["bytes"]:
             bad.append((rel, "size mismatch"))
         elif check_hash and sha256(path) != meta["sha256"]:
