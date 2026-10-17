@@ -20,7 +20,7 @@ Junshi Xia, <a href="https://cs.stanford.edu/~ermon/">Stefano Ermon</a>, <a href
 † Corresponding Author</h5>
 
 [[`Paper`](https://arxiv.org/abs/2605.11633)],
-[`Dataset` (coming soon)]
+[[`Dataset`](https://huggingface.co/datasets/Kingdrone-Junjue/DORA)]
 
 <div align="center">
   <img src="assets/teaser.jpg">
@@ -40,6 +40,7 @@ DORA (**D**isaster **O**perational **R**esponse **A**gent benchmark) includes 51
 
 ## News
 
+- 2026/10/17, The data and perception checkpoints are released on [Hugging Face](https://huggingface.co/datasets/Kingdrone-Junjue/DORA).
 - 2026/10/10, DORA v1.1 updates the task specifications and the evaluator; the leaderboard is updated to v1.1.
 - 2026/09/29, Code, the 108-tool MCP library, the data preparation script and the evaluator are released. The data and perception checkpoints are coming soon.
 - 2026/09/25, Our paper got accepted by NeurIPS 2026 (Evaluations & Datasets Track) as an **oral** presentation.
@@ -170,11 +171,8 @@ GDAL, PROJ and GEOS come with the `rasterio`/`pyogrio`/`shapely` wheels; no syst
 
 ## Data
 
-> The data (tasks, source layers and perception checkpoints) is coming soon; the commands below work
-> once it is online.
-
 The Hugging Face dataset asks for a short access form (name, affiliation, email; granted
-automatically): request access on the [dataset page](https://huggingface.co/datasets/UTokyo-AI4EO/DORA),
+automatically): request access on the [dataset page](https://huggingface.co/datasets/Kingdrone-Junjue/DORA),
 then log in once with `hf auth login` (or set `HF_TOKEN`) using a Read token; a fine-grained token
 needs "Read access to contents of all public gated repos you can access". One command downloads the tasks, source
 layers and perception checkpoints (~18 GB) into `./data` and verifies every file against the release
