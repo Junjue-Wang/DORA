@@ -81,15 +81,13 @@ In the code, `logi.loop`/`logi.reduce` are `tool.loop`/`tool.reduce`, and `m.ext
 
 #### DORA v1.1
 
-Final-answer accuracy (%) and trajectory metrics on DORA v1.1 (data and evaluator). Every row is a new run on v1.1. The best agent result in each column is in **bold**.
+Final-answer accuracy (%) and trajectory metrics on DORA v1.1 (data and evaluator). Agent runs on v1.1 will be added here.
 
 | Model                        | Type        | AVG       | T1 (PA)   | T2 (SR)   | T3 (OP)   | T4 (TE)   | T5 (RS)   | T-Any-O   | T-In-Ord  | T-Exact-M | ParAcc    | Eff       |
 |:---------------------------- |:----------- |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | Gold Trajectory              | Oracle      | 83.17     | 75.58     | 74.88     | 83.93     | 92.73     | 88.75     | 100.00    | 100.00    | 100.00    | 100.00    | 100.00    |
-| Claude-Opus-5.5              | Commercial  | **61.82** | **62.61** | 54.70     | **59.10** | 60.12     | **72.57** | 69.80     | 61.35     | 31.99     | 38.24     | **86.97** |
-| Claude-Sonnet-4.6            | Commercial  | 58.85     | 57.91     | **55.20** | 57.40     | **65.02** | 58.71     | **78.56** | **69.05** | **32.07** | **40.02** | 79.09     |
 
-One run per model (AP mode, `scripts/run_benchmark.py`). In these runs `m.summarize` (a T5 report tool) used Claude Opus 5.5 instead of the default Gemini 3 Flash; `DORA_SUMMARIZE_MODEL=anthropic/claude-opus-5.5` does the same (see [Running an agent](#running-an-agent)). Gold Trajectory is defined as in the paper (see below) and runs with the v1.1 tools and the released checkpoints; its trajectory metrics are 100 by definition. More models will be added as they are run on v1.1.
+Gold Trajectory is defined as in the paper (see below) and runs with the v1.1 tools and the released checkpoints; its trajectory metrics are 100 by definition.
 
 T-Any-O, T-In-Ord and T-Exact-M are Tool-Any-Order, Tool-In-Order and Tool-Exact-Match; ParAcc is Parameter Accuracy; Eff is efficiency, |gold steps| / max(|steps|, |gold steps|). All values are %, higher is better.
 
@@ -218,10 +216,9 @@ to `outputs/<model>_<MODE>/<task>/benchmark.jsonl`; interrupted runs continue wi
 `AZURE_OPENAI_ENDPOINT`. To add a model, copy a config and change `provider`
 (`gemini`, `openai` for any OpenAI-compatible endpoint with `base_url`, or `azure`) and `model`.
 
-`m.summarize` answers with Gemini 3 Flash. `export DORA_SUMMARIZE_MODEL=<model>` makes another model answer it: a
-GPT or Gemini model through its own API, any other model through OpenRouter (`OPENROUTER_API_KEY`; another
-OpenAI-compatible endpoint with `DORA_SUMMARIZE_BASE_URL` and `DORA_SUMMARIZE_API_KEY`). The agent runs of the
-v1.1 leaderboard used Claude Opus 5.5 for it (`DORA_SUMMARIZE_MODEL=anthropic/claude-opus-5.5`).
+`m.summarize` answers with Gemini 3 Flash. `export DORA_SUMMARIZE_MODEL=<model>` (e.g. `anthropic/claude-opus-5.5`)
+makes another model answer it: a GPT or Gemini model through its own API, any other model through OpenRouter
+(`OPENROUTER_API_KEY`; another OpenAI-compatible endpoint with `DORA_SUMMARIZE_BASE_URL` and `DORA_SUMMARIZE_API_KEY`).
 
 ## Evaluation
 
