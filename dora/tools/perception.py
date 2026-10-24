@@ -371,13 +371,13 @@ def seg_reconstruction_building(pre_image_path: str, post_image_path: str) -> st
 
 @mcp.tool(name="seg.landslide_ms", description='''
 Description:
-Segment landslide from post-disaster multi-modal data: multi-spectral optical + DEM + slope.
+Segment landslide from post-disaster multi-modal data: multi-spectral optical + slope + DEM.
 Spatial resolution: 10m.
-IMPORTANT: The input image MUST have exactly 14 bands (12-band multi-spectral + DEM: 1 band + Slope: 1 band).
-If your data has separate multi-spectral, DEM, and slope files, use ras.concat to merge them first.
+IMPORTANT: The input image MUST have exactly 14 bands, in this order: 12-band multi-spectral, slope (1 band), DEM (1 band).
+If your data has separate multi-spectral, slope and DEM files, merge them with ras.concat in that order first.
 
 Parameters:
-- post_image_path (str): Path to 14-band concatenated image (multi-spectral + dem + slope)
+- post_image_path (str): Path to 14-band concatenated image (multi-spectral + slope + dem)
 
 Returns:
 - mask_path (str): Path to the saved landslide mask image
@@ -434,13 +434,13 @@ def seg_landslide_bitemporal(pre_image_path: str, post_image_path: str) -> str:
 
 @mcp.tool(name="seg.reservoir", description='''
 Description:
-Segment reservoirs from multi-modal data: multi-spectral optical + DEM + slope.
+Segment reservoirs from multi-modal data: multi-spectral optical + slope + DEM.
 Spatial resolution: 10m.
-IMPORTANT: The input image MUST have exactly 14 bands (12-band multi-spectral + DEM: 1 band + Slope: 1 band).
-If your data has separate multi-spectral, DEM, and slope files, use ras.concat to merge them first.
+IMPORTANT: The input image MUST have exactly 14 bands, in this order: 12-band multi-spectral, slope (1 band), DEM (1 band).
+If your data has separate multi-spectral, slope and DEM files, merge them with ras.concat in that order first.
 
 Parameters:
-- post_image_path (str): Path to 14-band concatenated image (multi-spectral + dem + slope)
+- post_image_path (str): Path to 14-band concatenated image (multi-spectral + slope + dem)
 
 Returns:
 - mask_path (str): Path to the saved binary reservoir mask

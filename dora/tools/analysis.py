@@ -263,7 +263,10 @@ def _vectorize_mask_to_gdf(mask: np.ndarray, classes: ListInt, pixel_size_m: flo
             }
         )
 
-    return gpd.GeoDataFrame(records, geometry="geometry", crs=crs)
+    gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=crs)
+    if crs is not None and _measure_in_utm(gdf.crs):   # areas in m², not in degrees or Mercator units
+        gdf["area_m2"] = gdf.to_crs(gdf.estimate_utm_crs()).geometry.area.round(2).astype(float).values
+    return gdf
 
 
 def _save_gdf(gdf, filename: str, *key_parts: str) -> str:
@@ -908,6 +911,8 @@ def _build_road_graph(road_mask: np.ndarray, damaged_mask: np.ndarray,
         damaged = (dmg_ratio >= damaged_ratio_edge) and (dmg_count >= min_damaged_pixels)
         G.add_edge(u, v, pixels=pixels, length=length, damaged=bool(damaged))
 
+    # Skeleton steps already walked, in both directions: a segment walked from one end is not walked
+    # again from the other (that walk would add a second copy of it with its own turn nodes).
     visited_dir = set()
 
     G.graph["img_h"] = int(road_mask.shape[0])
@@ -923,6 +928,7 @@ def _build_road_graph(road_mask: np.ndarray, damaged_mask: np.ndarray,
             prev = n_xy
             cur = nb
             visited_dir.add((prev, cur))
+            visited_dir.add((cur, prev))
 
             def vec(a, b):
                 return (b[0] - a[0], b[1] - a[1])
@@ -951,6 +957,7 @@ def _build_road_graph(road_mask: np.ndarray, damaged_mask: np.ndarray,
                              path_pixels[:])
                     break
                 visited_dir.add((cur, nxt))
+                visited_dir.add((nxt, cur))
 
                 if include_turn_nodes:
                     v_now = vec(cur, nxt)
@@ -1073,6 +1080,7 @@ def _graph_edges_to_centerline_gdf(G: nx.Graph, transform=None, crs=None):
             return (c, img_h - 1 - r)
         return (c, r)
 
+    pixel_transform = json.dumps(list(transform)[:6]) if transform is not None else None
     rows = []
     for u, v, data in G.edges(data=True):
         pix = data.get("pixels", [])
@@ -1088,11 +1096,12 @@ def _graph_edges_to_centerline_gdf(G: nx.Graph, transform=None, crs=None):
             "damaged": bool(data.get("damaged", False)),
             "img_h": img_h,
             "img_w": img_w,
+            "pixel_transform": pixel_transform,
             "geometry": line
         })
     if not rows:
         return gpd.GeoDataFrame(
-            columns=["u", "v", "length_px", "length", "damaged", "img_h", "img_w", "geometry"],
+            columns=["u", "v", "length_px", "length", "damaged", "img_h", "img_w", "pixel_transform", "geometry"],
             geometry="geometry",
             crs=crs,
         )
@@ -1944,15 +1953,29 @@ def vec_connected_components(vector_path: str) -> str:
 
 
 
+def _measure_in_utm(crs):
+    """Whether a layer in ``crs`` is measured in its UTM zone instead of its own units: geographic
+    layers, and Mercator layers (e.g. EPSG:3857), whose metres are 1/cos(latitude) too long."""
+    if crs is None:
+        return False
+    if crs.is_geographic:
+        return True
+    try:
+        method = crs.coordinate_operation.method_name.lower()
+    except Exception:
+        return False
+    return "mercator" in method and "transverse" not in method
+
+
 def _metric_frame(gdf, pixel_size_m=None):
     """(layer, metres per coordinate unit) for measuring a vector layer.
 
     Pixel-space layers (no CRS) are scaled by ``pixel_size_m``; projected layers are measured in
-    their own units (metres for UTM), ignoring ``pixel_size_m``; geographic layers are projected
-    to their UTM zone first."""
+    their own units (metres for UTM), ignoring ``pixel_size_m``; geographic and Mercator layers
+    are projected to their UTM zone first."""
     if gdf.crs is None:
         return gdf, (float(pixel_size_m) if pixel_size_m is not None else None)
-    if gdf.crs.is_geographic:
+    if _measure_in_utm(gdf.crs):
         return gdf.to_crs(gdf.estimate_utm_crs()), 1.0
     return gdf, float(gdf.crs.axis_info[0].unit_conversion_factor or 1.0)
 
@@ -2337,8 +2360,8 @@ def vec_pixel_to_world(raster_path: str, pixel_row: int, pixel_col: int) -> str:
 
 
 def _buffer_metres(gdf, dist):
-    """Buffer by ``dist`` layer units; a geographic layer is buffered in metres in its UTM zone."""
-    if gdf.crs is not None and gdf.crs.is_geographic:
+    """Buffer by ``dist`` layer units; a geographic or Mercator layer is buffered in metres in its UTM zone."""
+    if _measure_in_utm(gdf.crs):
         utm = gdf.estimate_utm_crs()
         return gdf.to_crs(utm).geometry.buffer(dist).to_crs(gdf.crs)
     return gdf.geometry.buffer(dist)
@@ -2487,14 +2510,18 @@ def road_centerline_extraction(mask_path: str,
     if damaged_classes is None:
         damaged_classes = [2, 3]
 
-    # The centerlines stay in the pixel frame of the mask, also for georeferenced masks:
-    # vec.build_graph and vec.graph_shortest_path work in pixel (row, col) coordinates.
+    # The centerlines are in the frame ras.vectorize gives the same mask: world coordinates for a
+    # georeferenced mask, (col, row) pixel coordinates otherwise, so the two can be overlaid.
+    # vec.build_graph maps them back to pixels with the stored `pixel_transform`.
     mask = None
+    transform, crs = None, None
     try:
         import rasterio as rio
 
         with rio.open(mask_path) as src:
             mask = src.read(1) if src.count < 3 else np.moveaxis(src.read([1, 2, 3]), 0, -1)
+            if src.crs is not None:
+                transform, crs = src.transform, src.crs
     except Exception:
         pass
 
@@ -2507,7 +2534,7 @@ def road_centerline_extraction(mask_path: str,
     damage_mask = np.isin(mask, damaged_classes)
 
     G = _build_road_graph(road_all, damage_mask)
-    center_gdf = _graph_edges_to_centerline_gdf(G)
+    center_gdf = _graph_edges_to_centerline_gdf(G, transform=transform or Affine.identity(), crs=crs)
     center_path = _save_gdf(center_gdf, "road_centerline.geojson")
 
     result = {
@@ -2528,7 +2555,7 @@ Description:
 Build a road graph from centerline GeoJSON. Nodes are endpoints of each line, edges carry pixel coordinates and length.
 
 Parameters:
-- centerline_path (str): Path to centerline GeoJSON (LineString geometries, pixel space)
+- centerline_path (str): Path to centerline GeoJSON from vec.road_centerline_extraction
 
 Returns:
 - graph_path (str): Path to saved graph pickle (networkx graphml)
@@ -2560,6 +2587,16 @@ def build_road_graph(centerline_path: str) -> str:
                     img_w = int(first_w.iloc[0])
             except Exception:
                 img_w = None
+        # centerlines of vec.road_centerline_extraction carry the mask's pixel -> coordinate transform
+        # (the GeoJSON driver may read it back as an array instead of the stored JSON string)
+        pixel_transform = None
+        if "pixel_transform" in gdf.columns:
+            first_t = gdf["pixel_transform"].dropna()
+            if len(first_t):
+                v = first_t.iloc[0]
+                coeffs = json.loads(v) if isinstance(v, str) else list(v)
+                pixel_transform = json.dumps([float(c) for c in coeffs][:6])
+        inv = ~Affine(*json.loads(pixel_transform)) if pixel_transform else None
 
         def get_node_id(xy):
             if xy not in node_id_map:
@@ -2572,7 +2609,12 @@ def build_road_graph(centerline_path: str) -> str:
             if geom.is_empty:
                 continue
             coords = list(geom.coords)
-            if img_h is not None:
+            if inv is not None:
+                pixels = []
+                for x, y in coords:
+                    px_col, px_row = inv * (x, y)
+                    pixels.append((int(round(px_row - 0.5)), int(round(px_col - 0.5))))
+            elif img_h is not None:   # older centerline files: y-up pixel frame
                 pixels = [(int(round(img_h - 1 - y)), int(round(x))) for x, y in coords]
             else:
                 pixels = [(int(round(y)), int(round(x))) for x, y in coords]  # store as (row, col)
@@ -2595,6 +2637,10 @@ def build_road_graph(centerline_path: str) -> str:
             G.graph["img_h"] = img_h
         if img_w is not None:
             G.graph["img_w"] = img_w
+        if pixel_transform:
+            G.graph["pixel_transform"] = pixel_transform
+        if gdf.crs is not None:
+            G.graph["crs_wkt"] = gdf.crs.to_wkt()
 
         _h = hashlib.md5(centerline_path.encode("utf-8")).hexdigest()[:6]
         graph_path = TEMP_DIR / f"road_graph_{_h}.graphml"
@@ -2726,12 +2772,18 @@ def graph_shortest_path(graph_path: str,
     G = _load_graph_graphml(graph_path)
 
     img_h = G.graph.get("img_h")
+    pixel_transform = G.graph.get("pixel_transform")
+    fwd = Affine(*json.loads(pixel_transform)) if pixel_transform else None
+    crs = G.graph.get("crs_wkt") or None
 
     total_len_px, path_pixels, sxy, txy, snapped_on_damaged, snap_failed = shortest_path_on_intact_roads(
         G, tuple(start), tuple(end), snap_buffer_px=snap_buffer_px
     )
 
     def _pix_to_xy(p):
+        # the path is saved in the frame of the centerline it was built from
+        if fwd is not None:
+            return tuple(fwd * (p[1] + 0.5, p[0] + 0.5))
         if img_h is not None:
             return (p[1], img_h - 1 - p[0])
         return (p[1], p[0])
@@ -2745,7 +2797,7 @@ def graph_shortest_path(graph_path: str,
             "distance_m": None,
             "snapped_on_damaged": snapped_on_damaged,
             "snap_failed": snap_failed
-        }], geometry=[line], crs=None)
+        }], geometry=[line], crs=crs)
         path_geojson = _save_gdf(gdf, "road_path.geojson")
         return {
             "tool": "vec.graph_shortest_path",
@@ -2764,7 +2816,7 @@ def graph_shortest_path(graph_path: str,
     gdf = gpd.GeoDataFrame([{
         "distance_px": total_len_px,
         "distance_m": distance_m
-    }], geometry=[line], crs=None)
+    }], geometry=[line], crs=crs)
     path_geojson = _save_gdf(gdf, "road_path.geojson")
 
     result = {
@@ -2801,6 +2853,9 @@ def vec_length(vector_path: str, pixel_size_m: float = None) -> str:
     if gdf.empty:
         return {"tool": "vec.length", "total_length_m": 0.0, "count": 0,
                 "vector_path": vector_path, "note": "Empty input; no features to measure."}
+    if gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).any():
+        raise ValueError("vec.length measures LineString features, but this layer has polygons: use "
+                         "vec.perimeter for their outlines, or vec.road_centerline_extraction for road lengths.")
     if "id" not in gdf.columns:
         gdf["id"] = list(range(1, len(gdf) + 1))
 
@@ -3301,27 +3356,33 @@ def vec_polygon_nearest(vector_a_path: str,
     if gdf_a.crs is not None and gdf_b.crs is not None:
         gdf_b = gdf_b.to_crs(gdf_a.crs)
 
+    import shapely
+
     rows = []
     link_geoms = []
 
+    # B features with a geometry, in layer order; ties in distance go to the earlier feature
+    b_geoms = np.asarray(gdf_b.geometry.values, dtype=object)
+    b_keep = np.flatnonzero(~(shapely.is_missing(b_geoms) | shapely.is_empty(b_geoms)))
+    b_geoms = b_geoms[b_keep]
+    tree = shapely.STRtree(b_geoms) if len(b_geoms) else None
+
     for _, a_row in gdf_a.iterrows():
         a_geom = a_row.geometry
-        if a_geom is None or a_geom.is_empty:
+        if a_geom is None or a_geom.is_empty or tree is None:
             continue
 
-        dists = []
-        for _, b_row in gdf_b.iterrows():
-            b_geom = b_row.geometry
-            if b_geom is None or b_geom.is_empty:
-                continue
-            d = float(a_geom.distance(b_geom))
-            dists.append((d, b_row))
+        if int(topk) == 1:   # spatial index: all equally near B features, the first of them
+            near, dist = tree.query_nearest(a_geom, all_matches=True, return_distance=True)
+            j = int(np.min(near))
+            order, d_all = [j], {j: float(dist[int(np.argmin(near))])}
+        else:
+            d = shapely.distance(a_geom, b_geoms)
+            order = list(np.argsort(d, kind="stable")[:int(topk)])
+            d_all = {int(j): float(d[j]) for j in order}
+        dists = [(d_all[int(j)], gdf_b.iloc[int(b_keep[int(j)])]) for j in order]
 
-        if not dists:
-            continue
-
-        dists.sort(key=lambda x: x[0])
-        for rank, (dist_px, b_row) in enumerate(dists[:topk], start=1):
+        for rank, (dist_px, b_row) in enumerate(dists, start=1):
             p_a, p_b = nearest_points(a_geom, b_row.geometry)
 
             if gdf_a.crs is None:
@@ -3903,7 +3964,10 @@ def vec_convex_hull(
         out_gdf = gpd.GeoDataFrame(geometry=[hull], crs=gdf.crs)
         out_gdf.to_file(out_path, driver="GeoJSON")
 
-        area = float(hull.area) if gdf.crs and gdf.crs.is_projected else 0.0
+        if gdf.crs is not None and _measure_in_utm(gdf.crs):
+            area = float(out_gdf.to_crs(out_gdf.estimate_utm_crs()).geometry.area.iloc[0])
+        else:
+            area = float(hull.area) if gdf.crs and gdf.crs.is_projected else 0.0
         vertex_count = len(list(hull.exterior.coords)) if hasattr(hull, "exterior") else 0
 
         return json.dumps({
