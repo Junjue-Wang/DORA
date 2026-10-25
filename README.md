@@ -86,8 +86,8 @@ Final-answer accuracy (%) and trajectory metrics on DORA v1.1 (data and evaluato
 | Model                        | Type        | AVG       | T1 (PA)   | T2 (SR)   | T3 (OP)   | T4 (TE)   | T5 (RS)   | T-Any-O   | T-In-Ord  | T-Exact-M | ParAcc    | Eff       |
 |:---------------------------- |:----------- |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | Gold Trajectory              | Oracle      | 80.80     | 76.35     | 68.28     | 82.68     | 90.32     | 86.35     | 100.00    | 100.00    | 100.00    | 100.00    | 100.00    |
-| Claude-Opus-5.5              | Commercial  | **61.39** | **62.56** | 53.38     | **60.60** | 59.71     | **70.71** | 70.41     | 61.88     | **32.45** | 38.55     | **87.21** |
-| Claude-Sonnet-4.6            | Commercial  | 58.54     | 58.18     | **54.04** | 57.57     | **65.86** | 57.06     | **78.55** | **68.91** | 32.36     | **40.03** | 79.42     |
+| Claude-Opus-5.5              | Commercial  | **61.42** | **62.56** | 53.38     | **60.93** | 59.71     | **70.49** | 70.41     | 61.88     | **32.45** | 38.55     | **87.21** |
+| Claude-Sonnet-4.6            | Commercial  | 58.56     | 58.18     | **54.04** | 57.90     | **65.86** | 56.84     | **78.55** | **68.91** | 32.36     | **40.03** | 79.42     |
 
 One run per model (AP mode, `scripts/run_benchmark.py`). In these runs `m.summarize` (a T5 report tool) used Claude Opus 5.5 instead of the default Gemini 3 Flash; to use the same model for it, set `DORA_SUMMARIZE_MODEL` (see [Running an agent](#running-an-agent)). Gold Trajectory is defined as in the paper (see below) and runs with the v1.1 tools and the released checkpoints; its trajectory metrics are 100 by definition. More models will be added as they are run on v1.1.
 
