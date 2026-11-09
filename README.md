@@ -266,6 +266,12 @@ If you use DORA in your research, please cite our following papers.
   booktitle={Proceedings of the Neural Information Processing Systems},
   year={2025}
 }
+@article{wang2026earthvl,
+      title={EarthVL: A Progressive Earth Vision-Language Understanding and Generation Framework},
+      author={Wang, Junjue and Zhong, Yanfei and Chen, Zihang and Zheng, Zhuo and Ma, Ailong and Zhang, Liangpei},
+      journal={IEEE Transactions on Pattern Analysis and Machine Intelligence},
+      year={2026}
+}
 ```
 
 ## License
